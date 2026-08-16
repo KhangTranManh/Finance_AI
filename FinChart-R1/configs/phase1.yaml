@@ -1,0 +1,22 @@
+baseline:
+  model: unsloth/Qwen3-VL-4B-Instruct-unsloth-bnb-4bit
+  load_in_4bit: true
+  max_new_tokens: 64
+  do_sample: false
+  seed: 42
+dataset:
+  name: HuggingFaceM4/ChartQA
+  split: val
+  num_samples: 500
+  offset: 0
+  shuffle: false
+evaluator:
+  numeric_tolerance: 1.0e-6
+judge:
+  timeout_seconds: 120
+  max_retries: 3
+  backoff_base_seconds: 1.0
+  backoff_max_seconds: 8.0
+  pause_seconds: 0.2
+  min_confidence: 0.70
+  save_after_each: true

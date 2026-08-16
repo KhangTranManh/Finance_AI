@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+checkpoints/
+outputs/
+*.safetensors
+*.bin
+.cache/
+huggingface/
+wandb/
+results/*.csv
+results/*.json
+!results/README.md

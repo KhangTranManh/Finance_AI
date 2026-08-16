@@ -1,0 +1,12 @@
+unsloth
+torch
+transformers
+datasets
+accelerate
+pillow
+pandas
+tqdm
+requests
+PyYAML
+python-dotenv
+pytest
