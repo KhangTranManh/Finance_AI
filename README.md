@@ -89,7 +89,7 @@ The approved pilot dataset stays local under `FinChart-R2/results/` and is inten
 
 ### Phase 2B — Targeted multimodal SFT
 
-Phase 2B fine-tunes Qwen3-VL-4B-Instruct with **Unsloth + QLoRA** using the approved Phase 2A examples.
+Phase 2B fine-tunes Qwen3-VL-4B-Instruct with **Unsloth + QLoRA** using the approved Phase 2A examples. The pilot has completed training and deterministic testing through [the Phase 2B notebook](FinChart-R2/notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb).
 
 - **Input:** chart image + question
 - **Target:** concise, inspectable supervision: relevant values, operation, calculation, and final answer
@@ -102,7 +102,9 @@ chart/question understanding -> correct grounding -> value extraction
 -> operation selection -> reasoning -> answer
 ```
 
-The post-SFT model will be evaluated with the exact frozen Phase 1 protocol, comparing Base 4B vs SFT-500 and, if justified, later 2k–3k+ SFT experiments. Evaluation tracks overall metrics as well as changes in each measured failure mode.
+The completed pilot trained on 408 strict-clean examples for 2 epochs (102 optimizer steps) and saved its QLoRA adapter. Its test on `ChartQA val[0:500]` achieved **345/500 = 69.0% deterministic accuracy**, compared with the Phase 1 base result of **317/500 = 63.4%**: a **+5.6 percentage-point** gain. On the same validation indices, SFT corrected 61 base-model errors and regressed on 33 previously correct cases.
+
+This is a positive pilot result, not a final Phase 2 claim: the completed SFT test used a different generation prompt and token budget from the original frozen R1 run. The next evaluation task is a protocol-identical rerun with the R1 prompt/configuration and semantic error analysis, followed by a decision on 2k–3k+ scale-up.
 
 ### Phase 3 — Reasoning optimization (planned)
 
@@ -159,8 +161,8 @@ Useful entry points:
 | Phase 2A teacher-annotation pilot | Complete |
 | Phase 2A strict-clean pilot dataset | Complete (408 local examples) |
 | Phase 2B pilot QLoRA SFT | Complete: 408 examples, 2 epochs |
-| Phase 2B deterministic validation | Preliminary positive: 69.0% (345/500) |
-| Protocol-identical frozen post-SFT evaluation | Next |
+| Phase 2B test: ChartQA `val[0:500]` | Complete: 69.0% (345/500), +5.6 pp vs base |
+| Protocol-identical frozen rerun + semantic error analysis | Next |
 | Phase 2 scale-up to 2k–3k+ | Pending pilot result |
 | Phase 3 vision GRPO | Planned |
 
