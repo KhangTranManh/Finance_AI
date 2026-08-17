@@ -1,0 +1,33 @@
+# Local Drive exports, archives, model artifacts, and generated evaluation data
+/drive/
+*.zip
+
+# Credentials and local Python/Jupyter state
+.env
+.env.*
+!.env.template
+**/__pycache__/
+*.py[cod]
+**/.ipynb_checkpoints/
+.pytest_cache/
+.DS_Store
+
+# Reproducible but non-versioned experiment artifacts
+/FinChart-R1/checkpoints/
+/FinChart-R1/logs/
+/FinChart-R1/data/
+/FinChart-R1/results/**
+!/FinChart-R1/results/
+!/FinChart-R1/results/README.md
+/FinChart-R2/results/**
+!/FinChart-R2/results/
+!/FinChart-R2/results/README.md
+/FinChart-R2/outputs/
+/FinChart-R2/data/
+**/checkpoints/
+**/wandb/
+**/models/
+*.safetensors
+*.bin
+*.pt
+*.pth

@@ -1,0 +1,23 @@
+.env
+.env.example
+.env.local
+__pycache__/
+*.py[cod]
+.DS_Store
+.ipynb_checkpoints/
+.pytest_cache/
+checkpoints/
+outputs/
+models/
+*.safetensors
+*.bin
+*.pt
+.cache/
+huggingface/
+wandb/
+*.log
+
+# Generated teacher outputs and local training data. Rebuild with scripts/.
+/results/**
+!/results/
+!/results/README.md

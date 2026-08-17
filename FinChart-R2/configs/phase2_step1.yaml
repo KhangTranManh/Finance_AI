@@ -1,0 +1,34 @@
+# Phase 2A / Step 1: design targets, not training hyperparameters.
+project:
+  phase: "2A"
+  step: 1
+  name: "failure-driven data strategy"
+
+source:
+  base_model: "unsloth/Qwen3-VL-4B-Instruct-unsloth-bnb-4bit"
+  dataset: "HuggingFaceM4/ChartQA"
+  training_split: "train"
+  frozen_evaluation_split: "val"
+  frozen_evaluation_offset: 0
+  frozen_evaluation_samples: 500
+
+# Targets are starting sampling goals after quality filtering, not quotas.
+curriculum_targets:
+  numerical_reasoning: 0.45
+  visual_grounding: 0.30
+  counting: 0.15
+  logical_reasoning: 0.10
+
+phase1_evidence:
+  evaluated_samples: 500
+  confirmed_incorrect: 114
+  numerical_reasoning_errors: 54
+  visual_extraction_errors: 34
+  counting_errors: 21
+  logical_reasoning_errors: 5
+  possible_label_errors: 28
+
+guardrails:
+  allow_validation_examples_in_training: false
+  auto_correct_semantic_labels: false
+  long_free_form_reasoning_targets: false
