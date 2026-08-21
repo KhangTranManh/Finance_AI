@@ -1,0 +1,25 @@
+phase: 2C
+name: visual_grounding_diagnosis
+source:
+  base_deterministic: FinChart-R1/results/qwen3vl4b_chartqa_val_0_500_deterministic.csv
+  base_semantic_audit: FinChart-R1/results/qwen3vl4b_chartqa_val_0_500_phase1_final.csv
+  sft_predictions: FinChart-R2/results/vali/sft_val_500.csv
+selection:
+  transitions:
+    - BOTH_WRONG
+    - BASE_CORRECT_SFT_WRONG
+  prioritize:
+    - VISUAL_EXTRACTION
+    - COUNTING
+  initial_annotation_limit: 100
+teacher:
+  provider_env: VISUAL_TEACHER_PROVIDER
+  api_key_env: VISUAL_TEACHER_API_KEY
+  model_env: VISUAL_TEACHER_MODEL
+  bbox_format: [ymin, xmin, ymax, xmax]
+  bbox_normalization: 0_to_1000
+validation:
+  minimum_confidence: 0.80
+  manual_audit_fraction: 0.20
+  teacher_is_ground_truth: false
+  direct_training_from_teacher_output: false

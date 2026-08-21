@@ -17,6 +17,20 @@ Each annotation has a closed task taxonomy and fields for target series/category
 
 Phase 2B has trained a QLoRA pilot on the 408 approved examples. Its preliminary deterministic validation result is 69.0% (345/500), versus the 63.4% Phase 1 base score. The result is tracked as preliminary because the pilot generation prompt differs from the frozen Phase 1 prompt; a protocol-identical rerun and semantic error analysis remain required before scaling data.
 
+## Phase 2C: train-only preference mining for multimodal DPO
+
+Phase 2C focuses on residual visual-grounding and counting failures. The previous 51 validation-derived preference pairs are retained only as a leaky infrastructure diagnostic; they cannot produce a reportable frozen-validation result. ORPO is retired in this project because the installed ORPO path did not preserve image tensors through preference training.
+
+The next reportable path mines new candidates only from ChartQA train:
+
+~~~text
+ChartQA train[500:2500] -> SFT-408 inference -> deterministic error queue
+-> teacher validation + manual audit -> schema-matched DPO pairs
+-> multimodal DPO -> frozen ChartQA val[0:500] evaluation
+~~~
+
+Run [Notebook 04](notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) on Colab to create resumable JSONL outputs under Google Drive. It defaults to 2,000 examples and writes all predictions, incorrect candidates, correct predictions, and a manifest. Incorrect predictions are review candidates only: do not train them directly. After teacher/audit review creates matched prompt / chosen / rejected pairs from ChartQA train, use [Notebook 05](notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb) as the multimodal DPO template.
+
 ## Repository layout
 
 ```text
@@ -48,6 +62,14 @@ Generated annotations, logs, audits, and SFT data stay under `results/` and are 
 
 Use [the Phase 2B pilot notebook](notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb) after Phase 2A produces the approved `v3_train_clean` JSONL. It trains the QLoRA pilot and saves adapters, checkpoints, metrics, and predictions locally. The tracked [pilot report](../reports/phase2b_pilot_408_evaluation.md) contains the extracted result; raw artifacts are intentionally ignored.
 
+## Phase 2C quick start
+
+1. In Colab, select Runtime Version 2026.07 and a GPU runtime.
+2. Run [Notebook 04](notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) through its JSONL export cell.
+3. Review and annotate only the error JSONL; retain subtype, evidence, and quality metadata.
+4. Build equal-schema DPO preference pairs from the validated train-only candidates.
+5. Run multimodal DPO, then evaluate once with the unchanged frozen Phase 1 evaluator.
+
 ## Guardrails
 
 - Never train on the frozen Phase 1 validation subset.
@@ -55,3 +77,4 @@ Use [the Phase 2B pilot notebook](notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408
 - Validate schema, taxonomy, answer representation, arithmetic, confidence, and semantic conflicts before SFT.
 - Do not use unrestricted chain-of-thought; targets are concise, inspectable structured supervision.
 - Scale from 500 to 2k-3k+ examples only after frozen evaluation shows a pilot improvement.
+- Do not report a score from the validation-derived 51-pair DPO diagnostic.

@@ -106,6 +106,46 @@ The completed pilot trained on 408 strict-clean examples for 2 epochs (102 optim
 
 This is a positive pilot result, not a final Phase 2 claim: the completed SFT test used a different generation prompt and token budget from the original frozen R1 run. The next evaluation task is a protocol-identical rerun with the R1 prompt/configuration and semantic error analysis, followed by a decision on 2k–3k+ scale-up.
 
+#### Base-versus-SFT transition analysis
+
+The per-sample comparator assigns one of four deterministic transition tags to every validation example:
+
+| Transition tag | Meaning | Samples |
+| --- | --- | ---: |
+| `BOTH_CORRECT` | Base correct, SFT correct | 284 |
+| `BASE_WRONG_SFT_CORRECT` | Base wrong, SFT correct | 61 |
+| `BASE_CORRECT_SFT_WRONG` | Base correct, SFT wrong | 33 |
+| `BOTH_WRONG` | Base wrong, SFT wrong | 122 |
+
+For the 114 errors confirmed by the Phase 1 semantic audit, the extracted outcome is:
+
+| Error type | Base errors | SFT fixed | SFT still wrong | Regressions* |
+| --- | ---: | ---: | ---: | ---: |
+| Numerical reasoning | 54 | 32 | 22 | 16 |
+| Counting | 21 | 10 | 11 | 7 |
+| Visual extraction | 34 | 8 | 26 | 5 |
+| Logical reasoning | 5 | 0 | 5 | 5 |
+
+\*Regression type is a transparent question-text heuristic, not a Phase 1 semantic-audited label, because the base answer was correct for those examples.
+
+**Assessment:** SFT-408 produces a meaningful early gain, driven primarily by numerical-reasoning fixes and with a useful counting improvement. Visual extraction remains the largest unresolved confirmed-error group, while logical reasoning received too little useful supervision in this pilot to improve. The result supports an exact-protocol rerun and a larger, more balanced dataset with extra visual-grounding and logical-reasoning examples; it does not yet justify claiming a final general-purpose improvement.
+
+### Phase 2C — Visual Grounding Diagnosis
+
+Phase 2C is a diagnosis stage before adding a detector, a grounding-aware VLM, or new supervision. It asks whether the visual/counting errors that remain after SFT are truly localization failures and whether their subtypes are concentrated enough to justify grounding-specific training.
+
+```text
+Base + SFT frozen validation results
+-> BOTH_WRONG and SFT-regression candidates
+-> visual/counting triage queue
+-> manual + teacher subtype review
+-> grounding-supervision decision
+```
+
+The current queue contains **78 review candidates**: 37 originate from Phase 1 confirmed visual/counting errors and 41 are question-text heuristic candidates. Each candidate is linked to its ChartQA validation image index and has an explicitly pending final subtype. The review taxonomy includes wrong series/color/category/value/point, legend association, axis alignment, counting, extrema, crop/small text, and other visual failures.
+
+The initial proposed subtype counts are triage only, not training labels. Read [the Phase 2C diagnosis protocol](FinChart-R2/docs/phase2c_visual_grounding_diagnosis.md) before using any reviewed examples for supervision.
+
 ### Phase 3 — Reasoning optimization (planned)
 
 After SFT demonstrates the desired solving behavior, the planned next direction is vision GRPO. The objective is to reinforce correct evidence selection, operation choice, numerical consistency, and robust behavior on difficult reasoning cases.
@@ -115,6 +155,20 @@ Base 4B -> SFT 4B -> SFT + GRPO 4B
 ```
 
 Phase 3 is planned research work, not an implemented result.
+
+#### Current Phase 2C direction - train-only preference mining and DPO
+
+The original 51 best-clean visual preference pairs were derived from the frozen validation analysis. They were used only for a leaky DPO infrastructure diagnostic: the adapter may be inspected for training stability, but it is not evaluated on val[0:500] and its output is not compared with the 69.0% SFT result. The earlier ORPO path was retired because its installed TRL/Unsloth stack did not preserve chart-image tensors through preference training.
+
+The reportable Phase 2C path is:
+
+~~~text
+ChartQA train[500:2500] -> SFT-408 deterministic inference
+-> incorrect-prediction JSONL queue -> teacher validation + manual audit
+-> schema-matched DPO pairs -> multimodal DPO -> frozen evaluation
+~~~
+
+[Notebook 04](FinChart-R2/notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) mines 2,000 train-only examples by default, resumes safely from JSONL checkpoints, and exports all, errors, and correct JSONL files. The error queue is a candidate pool, not DPO data: teacher review must produce matched chosen and rejected response schemas before training. [Notebook 05](FinChart-R2/notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb) remains a guarded multimodal DPO diagnostic template.
 
 ## Decision and scaling strategy
 
@@ -150,6 +204,8 @@ Useful entry points:
 - [Phase 1 notebooks](FinChart-R1/notebooks/)
 - [Phase 2A teacher-annotation notebook](FinChart-R2/notebooks/02_FinChart_R2_Phase2A_Teacher_Assisted_Annotation.ipynb)
 - [Phase 2B pilot SFT notebook](FinChart-R2/notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb)
+- [Phase 2C train-only DPO preference-mining notebook](FinChart-R2/notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb)
+- [Phase 2C guarded multimodal DPO notebook](FinChart-R2/notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb)
 - [Phase 2 data contract](FinChart-R2/docs/phase2a_data_contract.md)
 
 ## Current status
@@ -163,12 +219,16 @@ Useful entry points:
 | Phase 2B pilot QLoRA SFT | Complete: 408 examples, 2 epochs |
 | Phase 2B test: ChartQA `val[0:500]` | Complete: 69.0% (345/500), +5.6 pp vs base |
 | Protocol-identical frozen rerun + semantic error analysis | Next |
+| Phase 2C validation-derived DPO diagnostic | Complete infrastructure run; not benchmarkable |
+| Phase 2C train-only preference mining | Ready: Notebook 04 mines ChartQA train[500:2500] |
+| Phase 2C teacher audit and schema-matched DPO pairs | Next |
+| Phase 2C train-only multimodal DPO + frozen evaluation | Pending mined/audited pairs |
 | Phase 2 scale-up to 2k–3k+ | Pending pilot result |
 | Phase 3 vision GRPO | Planned |
 
 ## Experimental guardrails
 
-- The Phase 1 validation subset remains frozen and is never used for annotation or SFT.
+- The Phase 1 validation subset remains frozen for reportable comparisons. The historical 51-pair validation-derived DPO run is explicitly diagnostic-only and is never evaluated on the same frozen subset.
 - Teacher annotations are supervision candidates, not automatic ground truth.
 - Questionable labels are not silently rewritten.
 - Generated training data is quality-filtered and audited before use.

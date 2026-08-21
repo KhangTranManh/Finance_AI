@@ -35,6 +35,21 @@ Paired sample transitions on the same validation indices:
 
 The paired McNemar exact test gives `p = 0.0051`. This is a positive pilot signal: the SFT model fixes more baseline mistakes than it introduces regressions.
 
+## Error-type extraction
+
+`FinChart-R2/scripts/compare_phase1_vs_sft.py` merges the two prediction files by validation index and writes a local per-sample comparison table. For rows that Phase 1's semantic audit confirmed as incorrect, the error type is authoritative; the table below shows what SFT did to those errors.
+
+| Phase 1 confirmed error type | Base errors | SFT fixed | SFT still wrong | SFT regressions* |
+| --- | ---: | ---: | ---: | ---: |
+| Numerical reasoning | 54 | 32 | 22 | 16 |
+| Counting | 21 | 10 | 11 | 7 |
+| Visual extraction | 34 | 8 | 26 | 5 |
+| Logical reasoning | 5 | 0 | 5 | 5 |
+
+\*A regression has no Phase 1 error label because the base answer was correct. Its type is assigned by a transparent lexical heuristic from the question text, so it is a triage signal rather than a semantic-audited diagnosis.
+
+The strongest measured gain is numerical reasoning. Visual extraction remains the main unresolved error group, and the five confirmed logical-reasoning errors were not fixed by this pilot.
+
 ## Observed limitations
 
 - The saved SFT evaluation used a bare-question prompt and `max_new_tokens=192`; Phase 1 used its frozen final-answer prompt and `max_new_tokens=64`. Therefore the 69.0% result is **promising preliminary evidence**, not yet the final protocol-identical Phase 1 comparison.

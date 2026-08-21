@@ -35,10 +35,40 @@ Research boundary: all 51 pairs were derived from frozen ChartQA val[0:500]. Thi
     markdown(
         """## 1. Colab runtime
 
-In Colab select **Runtime -> Change runtime type -> T4 GPU** (or stronger). This notebook does not use the local machine GPU.
+In Colab select **Runtime -> Change runtime type -> T4 GPU** (or stronger) and Runtime Version **2026.07**. This stable runtime uses Python 3.12.13 and NumPy 2.0.2; do not use the newer Python 3.13 runtime for this notebook.
 """
     ),
-    code("!pip install -q -U unsloth unsloth_zoo trl transformers accelerate bitsandbytes peft datasets pillow\n"),
+    code(
+        """import sys
+
+assert sys.version_info[:2] == (3, 12), (
+    f'Expected Colab Runtime Version 2026.07 (Python 3.12), found Python {sys.version.split()[0]}. '
+    'Use Runtime -> Change runtime type -> Runtime Version -> 2026.07, then reconnect.'
+)
+print('Python runtime:', sys.version)
+"""
+    ),
+    code(
+        """!pip install -q --no-cache-dir --upgrade "numpy==2.0.2" "pillow==11.3.0"
+!pip install -q -U --no-cache-dir unsloth unsloth_zoo transformers accelerate bitsandbytes peft datasets
+!pip install -q --no-cache-dir --upgrade "torchvision>=0.28.0"
+!pip install -q --no-cache-dir --upgrade --force-reinstall "trl==1.9.2"
+"""
+    ),
+    markdown(
+        """### Restart required after installation
+
+After the installation cell finishes, select **Runtime -> Restart session**, then resume at Mount Google Drive. This loads the pinned TRL VLM-DPO API and prevents mixed NumPy/Pillow binaries after package installation.
+"""
+    ),
+    code(
+        """import torch
+import torchvision
+
+print('torch:', torch.__version__)
+print('torchvision:', torchvision.__version__)
+"""
+    ),
     markdown(
         """## 2. Mount Google Drive
 
@@ -100,7 +130,7 @@ print('LEAKY DIAGNOSTIC: frozen evaluation is disabled for this adapter.')
     markdown(
         """## 4. Build a VLM preference dataset
 
-TRL DPO receives the chart as a top-level image column plus conversational prompt, chosen, and rejected columns. Do not use UnslothVisionDataCollator here: DPO selects its own vision-preference collator.
+TRL DPO receives the chart as a top-level images column plus conversational prompt, chosen, and rejected columns. The user prompt carries text only; the DPO vision collator injects the image placeholder from the images column. Do not use UnslothVisionDataCollator here.
 """
     ),
     code(
@@ -116,22 +146,16 @@ examples = []
 for row in records:
     image = datasets_by_split[row['image_split']][int(row['image_index'])]['image']
     examples.append({
-        'prompt': [{
-            'role': 'user',
-            'content': [
-                {'type': 'image', 'image': image},
-                {'type': 'text', 'text': row['prompt']},
-            ],
-        }],
+        'prompt': [{'role': 'user', 'content': row['prompt']}],
         'chosen': [{'role': 'assistant', 'content': row['chosen']}],
         'rejected': [{'role': 'assistant', 'content': row['rejected']}],
-        'image': image,
+        'images': [image],
         'dataset_index': int(row['dataset_index']),
     })
 
 dpo_dataset = Dataset.from_list(examples)
 assert len(dpo_dataset) == 51
-assert 'image' in dpo_dataset.column_names
+assert 'images' in dpo_dataset.column_names
 print(dpo_dataset)
 print('Chosen example:\\n', records[0]['chosen'])
 print('Rejected example:\\n', records[0]['rejected'])
@@ -139,7 +163,8 @@ print('Rejected example:\\n', records[0]['rejected'])
     ),
     markdown("## 5. Load the SFT-408 policy adapter\n"),
     code(
-        """import torch
+        """import unsloth
+import torch
 from peft import PeftModel
 from unsloth import FastVisionModel, is_bfloat16_supported
 
@@ -161,11 +186,19 @@ print('Loaded trainable SFT-408 policy adapter.')
     markdown(
         """## 6. DPO VLM preflight
 
-TRL DPO supports a top-level image column for Vision-Language Models. max_length=None is required here so image tokens are not truncated. The batch must contain pixel_values before training.
+TRL DPO supports a top-level images column for Vision-Language Models. max_length=None is required here so image tokens are not truncated. The explicit TRL vision-preference collator removes ambiguity from version-specific automatic collator selection. The batch must contain pixel_values before training.
 """
     ),
     code(
-        """from trl import DPOConfig, DPOTrainer
+        """import trl
+from packaging.version import Version
+assert Version(trl.__version__) >= Version('1.9.2'), (
+    f'TRL {trl.__version__} is too old for this VLM DPO notebook. '
+    'Rerun Cell 1, restart the runtime, then start again from Cell 2.'
+)
+
+from trl import DPOConfig, DPOTrainer
+from trl.trainer.dpo_trainer import DataCollatorForVisionPreference
 
 DPO_BETA = 0.05
 dpo_args = DPOConfig(
@@ -186,6 +219,12 @@ dpo_args = DPOConfig(
     report_to='none',
 )
 
+# Explicit VLM collator: do not replace with UnslothVisionDataCollator.
+vision_collator = DataCollatorForVisionPreference(
+    processor=processor,
+    max_length=None,
+)
+
 # ref_model=None makes DPO retain the initial policy state as its reference.
 trainer = DPOTrainer(
     model=model,
@@ -193,9 +232,12 @@ trainer = DPOTrainer(
     args=dpo_args,
     train_dataset=dpo_dataset,
     processing_class=processor,
+    data_collator=vision_collator,
 )
 
 batch = next(iter(trainer.get_train_dataloader()))
+print('DPO collator:', type(trainer.data_collator).__name__)
+print('Batch keys:', sorted(batch.keys()))
 assert 'pixel_values' in batch, 'DPO VLM preflight failed: image tensors are absent.'
 print({key: tuple(value.shape) for key, value in batch.items() if hasattr(value, 'shape')})
 print('DPO VLM preflight passed.')
