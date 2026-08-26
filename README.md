@@ -1,243 +1,102 @@
 # FinChart
 
-FinChart is a research-oriented engineering project on reliable chart understanding and quantitative visual reasoning with a compact vision-language model. It investigates whether **Qwen3-VL-4B-Instruct** can be specialized for chart-analysis workloads through measured failure analysis, teacher-assisted dataset engineering, targeted multimodal SFT, and later reasoning optimization.
-
-The goal is not simply to maximize one benchmark score. FinChart studies whether a compact model can achieve useful reliability for specialized chart reasoning while reducing dependence on larger, more expensive VLMs at inference time.
-
-## Research question
-
-> How much chart understanding and quantitative reasoning capability can be transferred into a compact vision-language model through targeted supervision and reasoning optimization?
+FinChart is a research and engineering project for improving chart question answering in a compact vision-language model. The project follows an evidence-driven loop:
 
 ```text
-Evaluate -> diagnose failures -> construct targeted supervision -> SFT
-         -> frozen re-evaluation -> reasoning optimization -> comparison
+frozen baseline -> failure analysis -> targeted supervision
+-> compact-model training -> frozen re-evaluation
 ```
 
-Rather than training blindly on more data, each training decision is based on observed model failures.
-
-## Why chart reasoning?
-
-Answering a chart question requires a model to connect multiple capabilities:
-
-```text
-Question understanding -> visual grounding -> value extraction
-                       -> operation selection -> numerical/logical reasoning -> answer
-```
-
-An incorrect answer can therefore have different causes: selecting the wrong series, reading the wrong bar, choosing the wrong operation, making an arithmetic error, returning an incompatible representation, or miscounting visual elements. FinChart diagnoses these failure types separately.
-
-## Scope and model
-
-- **Student / deployable model:** `Qwen3-VL-4B-Instruct`
-- **Dataset:** `HuggingFaceM4/ChartQA`
-- **Training boundary:** ChartQA `train` only
-- **Frozen evaluation:** ChartQA `val[0:500]`
-- **Teacher role:** offline structured annotation only; the teacher is not used at deployment or treated as ground truth.
-
-The project targets four capabilities: visual grounding, numerical reasoning, counting, and logical reasoning.
-
-## Experimental design
-
-### Phase 1 — Baseline evaluation and failure analysis
-
-Phase 1 evaluates the base model on the frozen 500-example validation subset with a hybrid protocol: deterministic normalized matching followed by a VLM semantic examiner for unresolved mismatches. Verdicts distinguish `CORRECT`, `INCORRECT`, `AMBIGUOUS`, and `POSSIBLE_LABEL_ERROR` rather than treating all string mismatches as model errors.
-
-| Phase 1 result | Value |
-| --- | ---: |
-| Evaluated samples | 500 |
-| Deterministic correct | 317 |
-| Deterministic accuracy | 63.4% |
-| Final correct | 351 |
-| Final incorrect | 114 |
-| Resolved coverage | 93.0% |
-| Resolved accuracy | 75.48% |
-
-Confirmed error distribution:
-
-| Failure mode | Errors | Share |
-| --- | ---: | ---: |
-| Numerical reasoning | 54 | 47.4% |
-| Visual extraction | 34 | 29.8% |
-| Counting | 21 | 18.4% |
-| Logical reasoning | 5 | 4.4% |
-
-The main finding is that the base model generally understands chart questions, but remains limited by inconsistent visual grounding, numerical reasoning, and counting. This measured profile defines the Phase 2 curriculum.
-
-### Phase 2A — Teacher-assisted dataset engineering
-
-Phase 2A constructs SFT supervision from ChartQA train examples only.
-
-```text
-ChartQA train -> normalization -> VLM teacher -> structured annotation
-              -> deterministic validation -> quality filtering/audit -> SFT-ready data
-```
-
-The teacher generates closed-taxonomy annotations with fields such as task type, target series/category, relevant values, operation, calculation, final answer, and confidence. Its output is validated through schema and taxonomy checks, answer and representation equivalence, arithmetic recomputation where possible, conflict detection, confidence thresholds, and manual audit.
-
-Samples receive statuses including `VALIDATED`, `REVIEW_REPRESENTATION`, `REVIEW_CONFLICT`, `LOW_CONFIDENCE`, `INVALID_SCHEMA`, and `TEACHER_ERROR`. Only validated, strict-clean examples are eligible for pilot training.
-
-The initial 500-example ChartQA train pilot produced **408 strict-clean examples (81.6%)**, with this distribution:
-
-| Task type | Examples |
-| --- | ---: |
-| Numerical reasoning | 150 |
-| Visual grounding | 144 |
-| Logical reasoning | 77 |
-| Counting | 37 |
-
-The approved pilot dataset stays local under `FinChart-R2/results/` and is intentionally excluded from Git.
-
-### Phase 2B — Targeted multimodal SFT
-
-Phase 2B fine-tunes Qwen3-VL-4B-Instruct with **Unsloth + QLoRA** using the approved Phase 2A examples. The pilot has completed training and deterministic testing through [the Phase 2B notebook](FinChart-R2/notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb).
-
-- **Input:** chart image + question
-- **Target:** concise, inspectable supervision: relevant values, operation, calculation, and final answer
-- **Not used:** unrestricted chain-of-thought
-
-The pilot SFT is designed to teach the sequence:
-
-```text
-chart/question understanding -> correct grounding -> value extraction
--> operation selection -> reasoning -> answer
-```
-
-The completed pilot trained on 408 strict-clean examples for 2 epochs (102 optimizer steps) and saved its QLoRA adapter. Its test on `ChartQA val[0:500]` achieved **345/500 = 69.0% deterministic accuracy**, compared with the Phase 1 base result of **317/500 = 63.4%**: a **+5.6 percentage-point** gain. On the same validation indices, SFT corrected 61 base-model errors and regressed on 33 previously correct cases.
-
-This is a positive pilot result, not a final Phase 2 claim: the completed SFT test used a different generation prompt and token budget from the original frozen R1 run. The next evaluation task is a protocol-identical rerun with the R1 prompt/configuration and semantic error analysis, followed by a decision on 2k–3k+ scale-up.
-
-#### Base-versus-SFT transition analysis
-
-The per-sample comparator assigns one of four deterministic transition tags to every validation example:
-
-| Transition tag | Meaning | Samples |
-| --- | --- | ---: |
-| `BOTH_CORRECT` | Base correct, SFT correct | 284 |
-| `BASE_WRONG_SFT_CORRECT` | Base wrong, SFT correct | 61 |
-| `BASE_CORRECT_SFT_WRONG` | Base correct, SFT wrong | 33 |
-| `BOTH_WRONG` | Base wrong, SFT wrong | 122 |
-
-For the 114 errors confirmed by the Phase 1 semantic audit, the extracted outcome is:
-
-| Error type | Base errors | SFT fixed | SFT still wrong | Regressions* |
-| --- | ---: | ---: | ---: | ---: |
-| Numerical reasoning | 54 | 32 | 22 | 16 |
-| Counting | 21 | 10 | 11 | 7 |
-| Visual extraction | 34 | 8 | 26 | 5 |
-| Logical reasoning | 5 | 0 | 5 | 5 |
-
-\*Regression type is a transparent question-text heuristic, not a Phase 1 semantic-audited label, because the base answer was correct for those examples.
-
-**Assessment:** SFT-408 produces a meaningful early gain, driven primarily by numerical-reasoning fixes and with a useful counting improvement. Visual extraction remains the largest unresolved confirmed-error group, while logical reasoning received too little useful supervision in this pilot to improve. The result supports an exact-protocol rerun and a larger, more balanced dataset with extra visual-grounding and logical-reasoning examples; it does not yet justify claiming a final general-purpose improvement.
-
-### Phase 2C — Visual Grounding Diagnosis
-
-Phase 2C is a diagnosis stage before adding a detector, a grounding-aware VLM, or new supervision. It asks whether the visual/counting errors that remain after SFT are truly localization failures and whether their subtypes are concentrated enough to justify grounding-specific training.
-
-```text
-Base + SFT frozen validation results
--> BOTH_WRONG and SFT-regression candidates
--> visual/counting triage queue
--> manual + teacher subtype review
--> grounding-supervision decision
-```
-
-The current queue contains **78 review candidates**: 37 originate from Phase 1 confirmed visual/counting errors and 41 are question-text heuristic candidates. Each candidate is linked to its ChartQA validation image index and has an explicitly pending final subtype. The review taxonomy includes wrong series/color/category/value/point, legend association, axis alignment, counting, extrema, crop/small text, and other visual failures.
-
-The initial proposed subtype counts are triage only, not training labels. Read [the Phase 2C diagnosis protocol](FinChart-R2/docs/phase2c_visual_grounding_diagnosis.md) before using any reviewed examples for supervision.
-
-### Phase 3 — Reasoning optimization (planned)
-
-After SFT demonstrates the desired solving behavior, the planned next direction is vision GRPO. The objective is to reinforce correct evidence selection, operation choice, numerical consistency, and robust behavior on difficult reasoning cases.
-
-```text
-Base 4B -> SFT 4B -> SFT + GRPO 4B
-```
-
-Phase 3 is planned research work, not an implemented result.
-
-#### Current Phase 2C direction - train-only preference mining and DPO
-
-The original 51 best-clean visual preference pairs were derived from the frozen validation analysis. They were used only for a leaky DPO infrastructure diagnostic: the adapter may be inspected for training stability, but it is not evaluated on val[0:500] and its output is not compared with the 69.0% SFT result. The earlier ORPO path was retired because its installed TRL/Unsloth stack did not preserve chart-image tensors through preference training.
-
-The reportable Phase 2C path is:
-
-~~~text
-ChartQA train[500:2500] -> SFT-408 deterministic inference
--> incorrect-prediction JSONL queue -> teacher validation + manual audit
--> schema-matched DPO pairs -> multimodal DPO -> frozen evaluation
-~~~
-
-[Notebook 04](FinChart-R2/notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) mines 2,000 train-only examples by default, resumes safely from JSONL checkpoints, and exports all, errors, and correct JSONL files. The error queue is a candidate pool, not DPO data: teacher review must produce matched chosen and rejected response schemas before training. [Notebook 05](FinChart-R2/notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb) remains a guarded multimodal DPO diagnostic template.
-
-## Decision and scaling strategy
-
-```text
-~400 validated examples -> pilot SFT -> frozen evaluation
-                                      |
-                         improvement? |
-                           yes         no
-                            |           |
-                     scale to 2k-3k+  revise data, target format,
-                                      curriculum, or LoRA configuration
-```
-
-The project does not scale teacher annotation before the pilot establishes that the supervision format improves the frozen evaluation.
-
-## Repository structure
-
-```text
-FinChart/
-├── FinChart-R1/   # frozen baseline evaluation and failure analysis
-├── FinChart-R2/   # Phase 2A data engineering and Phase 2B SFT
-│   ├── configs/
-│   ├── docs/
-│   ├── notebooks/
-│   ├── scripts/
-│   ├── results/   # local generated data, ignored by Git
-│   └── outputs/   # local adapters/checkpoints, ignored by Git
-└── README.md
-```
-
-Useful entry points:
-
-- [Phase 1 notebooks](FinChart-R1/notebooks/)
-- [Phase 2A teacher-annotation notebook](FinChart-R2/notebooks/02_FinChart_R2_Phase2A_Teacher_Assisted_Annotation.ipynb)
-- [Phase 2B pilot SFT notebook](FinChart-R2/notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb)
-- [Phase 2C train-only DPO preference-mining notebook](FinChart-R2/notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb)
-- [Phase 2C guarded multimodal DPO notebook](FinChart-R2/notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb)
-- [Phase 2 data contract](FinChart-R2/docs/phase2a_data_contract.md)
-
-## Current status
-
-| Stage | Status |
-| --- | --- |
-| Phase 1 baseline evaluation | Complete |
-| Phase 1 failure analysis | Complete |
-| Phase 2A teacher-annotation pilot | Complete |
-| Phase 2A strict-clean pilot dataset | Complete (408 local examples) |
-| Phase 2B pilot QLoRA SFT | Complete: 408 examples, 2 epochs |
-| Phase 2B test: ChartQA `val[0:500]` | Complete: 69.0% (345/500), +5.6 pp vs base |
-| Protocol-identical frozen rerun + semantic error analysis | Next |
-| Phase 2C validation-derived DPO diagnostic | Complete infrastructure run; not benchmarkable |
-| Phase 2C train-only preference mining | Ready: Notebook 04 mines ChartQA train[500:2500] |
-| Phase 2C teacher audit and schema-matched DPO pairs | Next |
-| Phase 2C train-only multimodal DPO + frozen evaluation | Pending mined/audited pairs |
-| Phase 2 scale-up to 2k–3k+ | Pending pilot result |
-| Phase 3 vision GRPO | Planned |
-
-## Experimental guardrails
-
-- The Phase 1 validation subset remains frozen for reportable comparisons. The historical 51-pair validation-derived DPO run is explicitly diagnostic-only and is never evaluated on the same frozen subset.
-- Teacher annotations are supervision candidates, not automatic ground truth.
-- Questionable labels are not silently rewritten.
-- Generated training data is quality-filtered and audited before use.
-- Structured supervision is concise and inspectable rather than unrestricted chain-of-thought.
-- Scaling decisions depend on frozen evaluation and failure-mode reduction, not only aggregate accuracy.
-- Final deployment remains independent of the larger offline teacher model.
+The deployable model is **Qwen3-VL-4B-Instruct**. Larger teacher models are used offline to propose and review training supervision; they are not required at inference time and are not treated as ground truth.
 
 ## Research hypothesis
 
-FinChart tests whether failure analysis, teacher-assisted structured supervision, targeted QLoRA SFT, and later reasoning optimization can progressively improve chart reasoning reliability in a compact 4B VLM—without requiring a much larger model at inference time.
+FinChart tests whether targeted, teacher-assisted structured supervision derived from measured baseline failures can improve the chart-reasoning capability of a compact 4B vision-language model without relying on a much larger model at inference time.
 
-Read the [Phase 2B pilot evaluation report](reports/phase2b_pilot_408_evaluation.md) for the tracked result summary, limitations, and next decision gate.
+## Experimental boundary
+
+- Dataset: `HuggingFaceM4/ChartQA`
+- Training and preference mining: ChartQA `train` only
+- Frozen benchmark: ChartQA `val[0:500]`
+- Main failure families: numerical reasoning, visual grounding, counting, and logical reasoning
+- Supervision format: concise relevant values, operation, calculation, and answer; no unrestricted chain-of-thought
+
+## Progress and results
+
+| Phase | Method | Current result |
+| --- | --- | --- |
+| Phase 1 | Base-model evaluation and failure analysis | 317/500 deterministic correct (63.4%) |
+| Phase 2A | Teacher-assisted dataset engineering | 408 strict-clean SFT examples from a 500-example train pilot |
+| Phase 2B | Unsloth vision QLoRA SFT | 345/500 (69.0%), a preliminary +5.6 percentage-point gain |
+| Phase 2C | Train-only preference mining and teacher review | 377 provisional DPO candidates awaiting manual audit |
+
+The Phase 2B comparison used the same validation indices, producing 284 both-correct cases, 61 SFT fixes, 33 regressions, and 122 both-wrong cases. The paired deterministic result is encouraging (`p = 0.0051` by exact McNemar test), but the SFT run used a different generation prompt and token budget from Phase 1. A protocol-identical rerun remains necessary before making a final model-quality claim. See the [Phase 2B evaluation report](reports/phase2b_pilot_408_evaluation.md).
+
+## Phase 2 workflow
+
+### Phase 2A: teacher-assisted dataset engineering
+
+```text
+ChartQA train -> normalization -> vision-language teacher
+-> structured annotation -> deterministic checks -> quality audit
+-> strict-clean SFT dataset
+```
+
+The teacher uses closed task and operation taxonomies. Schema validation, answer equivalence, arithmetic checks, confidence filtering, conflict detection, and manual audit decide whether an annotation is eligible for training.
+
+### Phase 2B: targeted multimodal SFT
+
+Qwen3-VL-4B-Instruct was fine-tuned with Unsloth and QLoRA on 408 approved examples. The released adapter used by later mining is `Kxck/Finance_500_v1`.
+
+### Phase 2C: train-only preference data
+
+The current reportable Phase 2C pipeline avoids validation leakage:
+
+```text
+ChartQA train[500:2500]
+-> SFT-408 inference
+-> 906 deterministic error candidates
+-> offline teacher raw capture
+-> deterministic normalization and conflict gates
+-> 377 provisional prompt/chosen/rejected pairs
+-> manual audit
+-> multimodal DPO
+-> frozen val[0:500] evaluation
+```
+
+Mining produced 2,000 predictions: 1,094 deterministic matches and 906 error candidates. Teacher analysis routed the 906 candidates as follows:
+
+| Route | Samples |
+| --- | ---: |
+| Provisional DPO candidate | 377 |
+| Representation-equivalent | 178 |
+| Model already correct | 122 |
+| Teacher/reference conflict | 123 |
+| Dataset ambiguity | 64 |
+| Capture failure or unparseable | 41 |
+| Unknown verdict | 1 |
+
+The 377 candidates passed automated pair gates, but the teacher remains an annotator rather than an oracle. Manual audit is required before training. Their heuristic task mix is 37.9% numerical, 30.0% counting, 21.5% logical, 6.9% lookup/other, and 3.7% explicit visual; visual coverage is therefore the main data-balance weakness.
+
+## Repository map
+
+```text
+FinChart-R1/             Phase 1 frozen baseline and error analysis
+FinChart-R2/
+  configs/              reproducible Phase 2 settings
+  docs/                 data strategy and contracts
+  notebooks/            Phase 2A, SFT, mining, capture, and pair export
+  scripts/              local reproducible pipeline stages
+  results/              generated local data, ignored by Git
+reports/                 tracked experiment summaries
+```
+
+Start with the [FinChart-R2 guide](FinChart-R2/README.md). Generated datasets, raw teacher messages, checkpoints, and credentials are intentionally excluded from Git.
+
+## Guardrails
+
+- Never use the frozen validation subset for training or preference optimization.
+- Do not convert every deterministic mismatch directly into a preference pair.
+- Keep raw teacher output for audit, but validate it independently before training.
+- Compare models with the same evaluator, prompt, decoding settings, and validation indices.
+- Report aggregate gains together with regressions and failure-mode changes.

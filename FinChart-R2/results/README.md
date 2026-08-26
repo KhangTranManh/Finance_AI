@@ -1,27 +1,48 @@
-# Local generated outputs
+# Local generated results
 
-This directory is deliberately excluded from Git except for this note. It may contain teacher checkpoints, request logs, audits, candidate datasets, approved pilot SFT data, and evaluations.
+This directory is ignored by Git except for this file. It contains only local datasets and intermediate evidence needed to reproduce or audit the current experiments.
 
-Recreate the Phase 2A pilot locally with the scripts listed in the root README. Do not commit raw teacher responses, provider metadata, API logs, or generated training data.
+## Retained artifacts
 
-At the current pilot stage, `phase2a_pilot_500_v3_train_clean.jsonl` is the only retained training artifact. It contains the strict-clean examples approved for a small SFT experiment; it is not a final full-train dataset.
+### Phase 2A
 
-`scripts/compare_phase1_vs_sft.py` writes local JSONL/JSON comparison artifacts under `comparison/`. They contain per-sample transition tags between base and SFT plus a summary of confirmed Phase 1 errors fixed by SFT. These artifacts are also ignored; the approved aggregate result is tracked in `../../reports/phase2b_pilot_408_evaluation.md`.
+```text
+phase2a_pilot_500_v3_train_clean.jsonl
+phase2a_pilot_500_v3_train_clean_report.json
+phase2a_pilot_500_v3_manual_audit_approval.json
+```
 
-`scripts/build_phase2c_visual_diagnosis.py` writes a local visual/counting review queue under `phase2c_visual_diagnosis/`. It intentionally leaves final subtypes pending manual or teacher review.
+The JSONL contains 408 strict-clean examples used by the Phase 2B pilot.
 
-## Phase 2C train-only preference-mining outputs
+### Phase 2B comparison
 
-[Notebook 04](../notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) writes resumable generated artifacts to the configured Google Drive run directory:
+```text
+comparison/phase1_vs_sft_500_comparison.jsonl
+comparison/phase1_vs_sft_500_summary.json
+```
 
-~~~text
-phase2c/train_preference_mining/
-  phase2c_train_500_2500_sft_predictions.jsonl
-  phase2c_train_500_2500_sft_errors.jsonl
-  phase2c_train_500_2500_sft_correct.jsonl
+These files preserve per-example base/SFT transition tags and the aggregate comparison. The approved, tracked summary is [the Phase 2B report](../../reports/phase2b_pilot_408_evaluation.md).
+
+### Phase 2C preference construction
+
+```text
+finchart_r2_phase2c_train_mining/
+  dpo_train_error.jsonl
   phase2c_train_500_2500_manifest.json
-~~~
+  dpo_train_teacher_raw_capture.jsonl
+  dpo_train_teacher_raw_capture_report.json
+  phase2c_teacher_v1_analysis_report.json
+  phase2c_teacher_v1_dpo_candidates_provisional.jsonl
+```
 
-The error JSONL is a train-only teacher-review queue, not direct DPO supervision. Keep the raw predictions and audit metadata local. Only a later validated pair artifact with response-schema-matched prompt, chosen, and rejected fields may be used by Phase 2C DPO.
+- `dpo_train_error.jsonl`: 906 deterministic SFT mismatch candidates from ChartQA `train[500:2500]`.
+- `dpo_train_teacher_raw_capture.jsonl`: raw, resumable teacher responses for all 906 candidates.
+- `phase2c_teacher_v1_dpo_candidates_provisional.jsonl`: 377 automatically gated prompt/chosen/rejected pairs.
 
-The earlier 51-pair validation-derived DPO output is an infrastructure diagnostic only. Do not commit it as a benchmark artifact or evaluate its adapter on the same frozen validation subset.
+The 377 pairs still require manual audit. They must not be presented as ground truth or used as a final training dataset without that audit.
+
+## Intentionally removed
+
+Duplicate CSV exports, deterministic-correct mining rows, deprecated strict-schema audit outputs, validation-derived preference diagnostics, failed API probes, and regenerable routing tables are not retained. They either duplicate the artifacts above, are obsolete, or cannot be used for reportable training.
+
+Do not commit credentials, provider reasoning/logs, raw datasets, adapters, or checkpoints.

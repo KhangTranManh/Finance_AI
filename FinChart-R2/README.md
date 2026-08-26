@@ -1,80 +1,90 @@
 # FinChart-R2
 
-Phase 2 of FinChart tests whether targeted, teacher-assisted structured supervision can improve chart reasoning in **Qwen3-VL-4B-Instruct**, while keeping the deployable model compact. The teacher is used offline only to create supervision; it is never required at inference time.
+FinChart-R2 contains Phase 2 of the FinChart project: teacher-assisted SFT data construction, targeted multimodal QLoRA training, and train-only preference mining for a later DPO experiment.
 
-## Research scope
+## Current status
 
-Phase 1 froze the evaluator and ChartQA `val[0:500]` subset, then identified four principal failure modes: numerical reasoning, visual grounding/value extraction, counting, and logical reasoning. Phase 2 uses **only ChartQA train** for SFT; the Phase 1 validation subset remains training-free.
+| Stage | Status | Output |
+| --- | --- | --- |
+| Phase 2A annotation pilot | Complete | 408 strict-clean ChartQA train examples |
+| Phase 2B SFT-408 | Complete | `Kxck/Finance_500_v1` |
+| Phase 2B deterministic test | Complete, preliminary | 345/500 (69.0%) on frozen `val[0:500]` |
+| Phase 2C train mining | Complete | 2,000 predictions; 906 error candidates |
+| Phase 2C teacher capture | Complete | 906 raw teacher records |
+| Phase 2C pair construction | Complete, provisional | 377 candidate DPO pairs |
+| Manual DPO-pair audit | Next | required before preference training |
+| Multimodal DPO and frozen evaluation | Pending | run only after audit |
 
-Phase 2A runs a teacher-assisted data-engineering pipeline:
+The Phase 2B result is a positive pilot signal, not a final apples-to-apples benchmark claim: its generation prompt and token budget differed from Phase 1. The tracked [evaluation report](../reports/phase2b_pilot_408_evaluation.md) records the limitation and exact numbers.
 
-```text
-ChartQA train -> normalization -> VLM teacher -> structured annotation
--> deterministic validation -> quality filtering/audit -> SFT-ready data
-```
+## Reproducible notebooks
 
-Each annotation has a closed task taxonomy and fields for target series/category, relevant values, operation, calculation, answer, and confidence. Only `VALIDATED` examples that pass strict filtering are eligible for the pilot SFT dataset. The current local pilot output contains 408 strict-clean examples from a 500-example annotation run; it is intentionally not committed to Git.
+Run the notebooks in this order when rebuilding the current pipeline:
 
-Phase 2B has trained a QLoRA pilot on the 408 approved examples. Its preliminary deterministic validation result is 69.0% (345/500), versus the 63.4% Phase 1 base score. The result is tracked as preliminary because the pilot generation prompt differs from the frozen Phase 1 prompt; a protocol-identical rerun and semantic error analysis remain required before scaling data.
+1. [Phase 2A teacher-assisted annotation](notebooks/02_FinChart_R2_Phase2A_Teacher_Assisted_Annotation.ipynb)
+2. [Phase 2B SFT-408](notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb)
+3. [Phase 2C Kaggle train mining](notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Kaggle.ipynb)
+4. [Phase 2C local raw teacher capture](notebooks/06_FinChart_R2_Phase2C_Teacher_Audit_HuggingFace.ipynb)
+5. [Teacher-output analysis and provisional DPO export](notebooks/07_FinChart_R2_Phase2C_Teacher_Raw_Analysis_and_DPO_Export.ipynb)
 
-## Phase 2C: train-only preference mining for multimodal DPO
+Notebook 06 retains its historical filename but now runs locally, loads credentials from `.env`, and saves the provider response without discarding schema-incomplete outputs. Notebook 07 performs parsing, normalization, deterministic conflict checks, routing, and pair export.
 
-Phase 2C focuses on residual visual-grounding and counting failures. The previous 51 validation-derived preference pairs are retained only as a leaky infrastructure diagnostic; they cannot produce a reportable frozen-validation result. ORPO is retired in this project because the installed ORPO path did not preserve image tensors through preference training.
-
-The next reportable path mines new candidates only from ChartQA train:
-
-~~~text
-ChartQA train[500:2500] -> SFT-408 inference -> deterministic error queue
--> teacher validation + manual audit -> schema-matched DPO pairs
--> multimodal DPO -> frozen ChartQA val[0:500] evaluation
-~~~
-
-Run [Notebook 04](notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) on Colab to create resumable JSONL outputs under Google Drive. It defaults to 2,000 examples and writes all predictions, incorrect candidates, correct predictions, and a manifest. Incorrect predictions are review candidates only: do not train them directly. After teacher/audit review creates matched prompt / chosen / rejected pairs from ChartQA train, use [Notebook 05](notebooks/05_FinChart_R2_Phase2C_DPO_Colab_Leakage_Gated.ipynb) as the multimodal DPO template.
-
-## Repository layout
+## Current Phase 2C data flow
 
 ```text
-FinChart-R2/
-|- configs/       # non-secret reproducible settings
-|- docs/          # research design and data contract
-|- notebooks/     # Colab entry point (outputs stripped for Git)
-|- scripts/       # reproducible Phase 2A pipeline stages
-|- results/       # local generated data; ignored by Git
-|- .env.template  # copy to .env and fill locally
-`- requirements.txt
+ChartQA train[500:2500]
+  -> SFT inference with Kxck/Finance_500_v1
+  -> dpo_train_error.jsonl (906 candidates)
+  -> dpo_train_teacher_raw_capture.jsonl (906 responses)
+  -> phase2c_teacher_v1_dpo_candidates_provisional.jsonl (377 pairs)
+  -> manual audit
+  -> final DPO dataset
 ```
 
-## Quick start: Phase 2A
+Do not use `dpo_train_correct.jsonl` as DPO supervision: a correct model prediction by itself has no rejected response and therefore is not a preference pair. Do not train directly from the 906 deterministic error queue either; it includes representation-equivalent answers, teacher/reference conflicts, ambiguities, and capture failures.
 
-1. Create a local environment file: `Copy-Item .env.template .env`, then set the teacher credentials locally.
-2. Install dependencies: `pip install -r requirements.txt`.
-3. In Colab, upload and run [the Phase 2A notebook](notebooks/02_FinChart_R2_Phase2A_Teacher_Assisted_Annotation.ipynb), or run the local stages in order:
+## Local setup
 
-   ```powershell
-   python scripts/run_phase2a_pilot.py
-   python scripts/rebuild_phase2a_v2.py
-   python scripts/approve_and_build_train_v3.py
-   ```
+```powershell
+cd FinChart-R2
+Copy-Item .env.template .env
+pip install -r requirements.txt
+```
 
-Generated annotations, logs, audits, and SFT data stay under `results/` and are excluded from version control.
+Fill `.env` locally. Never commit it. Phase 2A can also be rebuilt with:
 
-## Phase 2B pilot SFT
+```powershell
+python scripts/run_phase2a_pilot.py
+python scripts/rebuild_phase2a_v2.py
+python scripts/approve_and_build_train_v3.py
+```
 
-Use [the Phase 2B pilot notebook](notebooks/03_FinChart_R2_Phase2B_Pilot_SFT_408.ipynb) after Phase 2A produces the approved `v3_train_clean` JSONL. It trains the QLoRA pilot and saves adapters, checkpoints, metrics, and predictions locally. The tracked [pilot report](../reports/phase2b_pilot_408_evaluation.md) contains the extracted result; raw artifacts are intentionally ignored.
+For Phase 2C, the local capture script is resumable:
 
-## Phase 2C quick start
+```powershell
+python scripts/capture_phase2c_teacher_raw.py `
+  --input results/finchart_r2_phase2c_train_mining/dpo_train_error.jsonl `
+  --output-dir results/finchart_r2_phase2c_train_mining
+```
 
-1. In Colab, select Runtime Version 2026.07 and a GPU runtime.
-2. Run [Notebook 04](notebooks/04_FinChart_R2_Phase2C_DPO_Train_Preference_Mining_Colab.ipynb) through its JSONL export cell.
-3. Review and annotate only the error JSONL; retain subtype, evidence, and quality metadata.
-4. Build equal-schema DPO preference pairs from the validated train-only candidates.
-5. Run multimodal DPO, then evaluate once with the unchanged frozen Phase 1 evaluator.
+## Repository contents
 
-## Guardrails
+```text
+configs/       Phase 2A and Phase 2B settings
+docs/          data strategy and SFT data contract
+notebooks/     executable research workflows
+scripts/       local pipeline stages and evaluation comparator
+results/       local generated artifacts; ignored by Git
+```
 
-- Never train on the frozen Phase 1 validation subset.
-- The teacher is a primary annotator, not ground truth.
-- Validate schema, taxonomy, answer representation, arithmetic, confidence, and semantic conflicts before SFT.
-- Do not use unrestricted chain-of-thought; targets are concise, inspectable structured supervision.
-- Scale from 500 to 2k-3k+ examples only after frozen evaluation shows a pilot improvement.
-- Do not report a score from the validation-derived 51-pair DPO diagnostic.
+Only source code, notebooks, configuration, documentation, and aggregate reports belong in Git. Credentials, provider logs, raw teacher messages, generated JSONL datasets, adapters, and checkpoints remain local.
+
+## Data and evaluation rules
+
+- ChartQA `train` is the only training and preference-mining source.
+- ChartQA `val[0:500]` remains frozen and evaluation-only.
+- The teacher is an offline annotator, not ground truth.
+- SFT targets are concise structured answers, not unrestricted chain-of-thought.
+- DPO `chosen` and `rejected` responses must use the same output schema.
+- The 377 current pairs are provisional until manual audit is complete.
+- A reportable post-DPO comparison must reuse the exact frozen evaluator and generation protocol.
