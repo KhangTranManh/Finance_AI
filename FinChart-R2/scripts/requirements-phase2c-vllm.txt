@@ -1,0 +1,6 @@
+# Reproduces the completed RTX 4090 evaluation environment.
+vllm==0.28.0
+datasets==5.0.1
+peft==0.20.0
+qwen-vl-utils==0.0.14
+pillow==12.3.0

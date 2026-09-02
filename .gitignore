@@ -24,6 +24,7 @@
 !/FinChart-R2/results/README.md
 /FinChart-R2/outputs/
 /FinChart-R2/data/
+/FinChart-R2/.artifacts/
 **/checkpoints/
 **/wandb/
 **/models/
